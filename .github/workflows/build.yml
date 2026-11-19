@@ -1,0 +1,61 @@
+name: build-jarvispc3-exe
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Unpack source zip
+        shell: pwsh
+        run: |
+          Expand-Archive -Path JarvisPC3_source.zip -DestinationPath . -Force
+          if (-not (Test-Path "app/jarvis3.py")) { throw "app/jarvis3.py not found after unpack" }
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        working-directory: app
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r requirements.txt
+
+      - name: Download llama.cpp (Windows CPU build b12430)
+        working-directory: app
+        shell: pwsh
+        run: |
+          $url = "https://github.com/ggml-org/llama.cpp/releases/download/b12430/llama-b12430-bin-win-cpu-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile llama.zip
+          Expand-Archive -Path llama.zip -DestinationPath llama_tmp -Force
+          New-Item -ItemType Directory -Force -Path llama | Out-Null
+          Get-ChildItem -Path llama_tmp -Recurse -File | ForEach-Object { Copy-Item $_.FullName -Destination llama -Force }
+          Remove-Item llama.zip, llama_tmp -Recurse -Force
+          if (-not (Test-Path "llama/llama-server.exe")) { throw "llama-server.exe not found" }
+
+      - name: Download Vosk Japanese model (small ja 0.22)
+        working-directory: app
+        shell: pwsh
+        run: |
+          $url = "https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip"
+          Invoke-WebRequest -Uri $url -OutFile vosk.zip
+          Expand-Archive -Path vosk.zip -DestinationPath . -Force
+          Remove-Item vosk.zip
+          if (-not (Test-Path "vosk-model-small-ja-0.22")) { throw "vosk model not found" }
+
+      - name: Build exe with PyInstaller
+        working-directory: app
+        run: pyinstaller jarvis3.spec --noconfirm
+
+      - name: Upload exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: JarvisPC3-exe
+          path: app/dist/JarvisPC3.exe
